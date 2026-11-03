@@ -1,0 +1,12 @@
+# This folder holds the library's sources only. Students copy it into their
+# projects, and everything is built in the build folder of the project that
+# uses it (see CMakeLists.txt), so nothing generated belongs here.
+
+# dht22.pio.h is generated from src/dht22.pio during the build. A copy made by
+# hand (with pioasm) would not change when dht22.pio changes.
+*.pio.h
+
+# CMake run inside this folder by mistake
+build/
+CMakeCache.txt
+CMakeFiles/

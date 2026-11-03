@@ -1,0 +1,52 @@
+; SPDX-License-Identifier: MIT
+; Copyright (c) 2026 Dawid Zalewski
+;
+; The DHT22 (AM2302) one-wire protocol, for one PIO state machine.
+;
+; dht22.c runs the state machine at 1 MHz, so one PIO cycle takes 1 us and
+; every delay and loop count below is in microseconds.
+;
+; The IN pins and the SET pins both point at the data pin. The program never
+; drives the line high: dht22.c sets the pin's output value to 0 once, and the
+; program only changes the pin's direction:
+;   output (pindirs = 1): the Pico pulls the line low;
+;   input  (pindirs = 0): the Pico lets go, and the pull-up resistor pulls the
+;                         line high (unless the sensor is pulling it low).
+; That way the Pico and the sensor share one wire without ever fighting over
+; it (one driving it high while the other drives it low is a short circuit).
+
+.program dht22
+
+.wrap_target
+    pull block              ; sleep until the CPU asks for a measurement by putting
+    mov x, osr              ; the length of the start signal (in us) in the TX FIFO
+
+    ; 1. Start signal: pull the line low for x us (the datasheet wants at least 1 ms).
+    set pindirs, 1
+start_signal:
+    jmp x-- start_signal    ; 1 us per round
+
+    ; 2. Let go of the line and wait for the sensor's answer: 80 us low, 80 us high.
+    set pindirs, 0
+    wait 1 pin 0            ; the pull-up needs a moment to pull the line high
+    wait 0 pin 0            ; 20-40 us later the sensor pulls it low...
+    wait 1 pin 0            ; ...for 80 us, lets go for 80 us...
+    wait 0 pin 0            ; ...and starts sending the first bit
+
+    ; 3. Receive 40 bits = 5 bytes. Every bit is 50 us low, followed by a high
+    ;    pulse that is short (26-28 us) for a 0 and long (70 us) for a 1.
+    ;    So we look at the line 48 us after it went high: still high means 1.
+    ;    Every 16 bits go to the RX FIFO automatically (autopush): first the
+    ;    humidity, then the temperature.
+    set y, 4                ; 5 bytes...
+next_byte:
+    set x, 7                ; ...of 8 bits
+next_bit:
+    wait 1 pin 0 [31]       ; the high pulse begins: wait 1 + 31 us...
+    nop          [15]       ; ...and 16 us more = 48 us after the rising edge
+    in pins, 1              ; the line level is the bit
+    wait 0 pin 0            ; wait for the end of the pulse (for a 0, it has already ended)
+    jmp x-- next_bit
+    jmp y-- next_byte
+    push                    ; the last 8 bits, the checksum, are not 16: push them ourselves
+.wrap                       ; all 40 bits are in: wait for the next request
